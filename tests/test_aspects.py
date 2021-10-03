@@ -1,9 +1,47 @@
-from unittest.mock import Mock
-
 import pytest
 
+from classic.aspects import PointCut
 
-def test_cls_call(some_cls):
+
+@pytest.fixture
+def points():
+    return PointCut()
+
+
+@pytest.fixture
+def some_cls(points):
+
+    class SomeCls:
+
+        @points.join_point
+        def some_method(self, some_arg, some_kwarg=None):
+            return some_arg, some_kwarg
+
+    return SomeCls
+
+
+@pytest.fixture
+def some_function(points):
+
+    @points.join_point
+    def function(some_arg, some_kwarg=None):
+        return some_arg, some_kwarg
+
+    return function
+
+
+@pytest.fixture
+def advice():
+
+    def decorator(fn):
+        def wrapper(*args, **kwargs):
+            return fn(*args, **kwargs), 'ADDITIONAL'
+        return wrapper
+
+    return decorator
+
+
+def test_cls_method_call(some_cls):
     instance = some_cls()
 
     results = instance.some_method(1, some_kwarg=2)
@@ -11,51 +49,13 @@ def test_cls_call(some_cls):
     assert results == (1, 2)
 
 
-def test_call_with_instead(some_cls):
-    advice = Mock(return_value=None)
-    some_cls.some_method.instead(advice)
-    instance = some_cls()
+def test_cls_method_call_with_advice(some_cls, advice):
+    some_cls.some_method.join(advice)
 
-    result = instance.some_method(1, some_kwarg=2)
-
-    assert result is None
-
-
-def test_cls_success_call_with_advice(some_cls,
-                                      advice_before: Mock,
-                                      advice_after: Mock,
-                                      advice_on_exception: Mock):
     service = some_cls()
-    service.some_method.before(advice_before)
-    service.some_method.after(advice_after)
-    service.some_method.on_exception(advice_on_exception)
-
     results = service.some_method(1, some_kwarg=2)
 
-    assert results == (1, 2)
-
-    advice_before.assert_called_once_with(service, 1, some_kwarg=2)
-    advice_after.assert_called_once_with(service, 1, some_kwarg=2)
-    advice_on_exception.assert_not_called()
-
-
-def test_cls_error_call_with_advice(some_cls_with_error,
-                                    advice_before: Mock,
-                                    advice_after: Mock,
-                                    advice_on_exception: Mock):
-    service = some_cls_with_error()
-    service.some_method.before(advice_before)
-    service.some_method.after(advice_after)
-    service.some_method.on_exception(advice_on_exception)
-
-    with pytest.raises(ValueError):
-        service.some_method(1, some_kwarg=2)
-
-    advice_before.assert_called_once_with(service, 1, some_kwarg=2)
-    advice_after.assert_not_called()
-    advice_on_exception.assert_called_once_with(
-        service.error, service, 1, some_kwarg=2,
-    )
+    assert results == ((1, 2), 'ADDITIONAL')
 
 
 def test_func_call(some_function):
@@ -64,35 +64,20 @@ def test_func_call(some_function):
     assert results == (1, 2)
 
 
-def test_func_success_call_with_advice(some_function,
-                                       advice_before: Mock,
-                                       advice_after: Mock,
-                                       advice_on_exception: Mock):
-    some_function.before(advice_before)
-    some_function.after(advice_after)
-    some_function.on_exception(advice_on_exception)
+def test_func_call_with_advice(some_function, advice):
+    some_function.join(advice)
 
     results = some_function(1, some_kwarg=2)
 
-    assert results == (1, 2)
-
-    advice_before.assert_called_once_with(1, some_kwarg=2)
-    advice_after.assert_called_once_with(1, some_kwarg=2)
-    advice_on_exception.assert_not_called()
+    assert results == ((1, 2), 'ADDITIONAL')
 
 
-def test_func_error_call_with_advice(some_function_with_error,
-                                     advice_before: Mock,
-                                     advice_after: Mock,
-                                     advice_on_exception: Mock):
-    error, function = some_function_with_error
-    function.before(advice_before)
-    function.after(advice_after)
-    function.on_exception(advice_on_exception)
+def test_points_join(some_function, some_cls, points, advice):
+    points.join(advice)
 
-    with pytest.raises(ValueError):
-        function()
+    service = some_cls()
+    cls_results = service.some_method(1, some_kwarg=2)
+    func_results = some_function(1, some_kwarg=2)
 
-    advice_before.assert_called_once()
-    advice_after.assert_not_called()
-    advice_on_exception.assert_called_once_with(error)
+    assert cls_results == ((1, 2), 'ADDITIONAL')
+    assert func_results == ((1, 2), 'ADDITIONAL')
